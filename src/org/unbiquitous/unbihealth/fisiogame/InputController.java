@@ -13,6 +13,7 @@ import org.unbiquitous.uos.core.UOS;
 import org.unbiquitous.uos.core.UOSLogging;
 import org.unbiquitous.uos.core.messageEngine.dataType.UpDevice;
 import org.unbiquitous.uos.core.messageEngine.messages.Call;
+import org.unbiquitous.uos.core.messageEngine.messages.Notify;
 import org.unbiquitous.uos.core.messageEngine.messages.Response;
 import org.unbiquitous.uos.network.socket.TCPProperties;
 import org.unbiquitous.uos.network.socket.radar.MulticastRadar;
@@ -80,8 +81,11 @@ import java.util.regex.Pattern;
 public class InputController extends JFrame {
     private static UOSThread uosThread;
 
+    private static UOS uos;
+    private static UpDevice fisiogameDevice;
+
     static {
-        UOSLogging.setLevel(Level.FINE);
+        UOSLogging.setLevel(Level.ALL);
     }
 
     public static void main(String args[]) throws Exception {
@@ -101,6 +105,13 @@ public class InputController extends JFrame {
             });
             controller.setVisible(true);
         });
+        uos = new UOS();
+        TCPProperties props = new MulticastRadar.Properties();
+        props.setPort(8300);
+        props.setPassivePortRange(8301, 8310);
+        props.put("ubiquitos.multicast.beaconFrequencyInSeconds", 10);
+        uos.start(props);
+        fisiogameDevice = new UpDevice("fisiogame").addNetworkInterface("0.0.0.0:8302", "Ethernet:TCP");
         (new Thread(uosThread = new UOSThread())).start();
     }
 
@@ -536,6 +547,25 @@ public class InputController extends JFrame {
             TimeSeries base = curvesMap.get(refCurveId);
             TimeWarpInfo info = FastDTW.compare(base, ts, WORST_DIST);
             log(info.toString());
+
+
+            double distance = info.getDistance();
+            if (distance < 20) {
+
+                Notify n = new Notify("update", "unbihealth.PinDriver");
+                n.setEventKey("update");
+                n.addParameter("pin", "punch");
+                n.addParameter("value", (float)(1- distance / 20));
+                try {
+                    System.out.println("Sending Notify");
+                    uos.getGateway().notify(n, fisiogameDevice);
+                }
+                catch (Exception e) {
+                    System.out.println(e.getClass());
+                    System.out.println(e.getMessage());
+                    e.printStackTrace();
+                }
+            }
         } else if (showFileDialog(DialogType.SAVE, JSON_FILTER, false) == JOptionPane.OK_OPTION) {
             final ObjectMapper mapper = new ObjectMapper();
             mapper.writerWithDefaultPrettyPrinter().writeValue(fileChooser.getSelectedFile(), samples);
@@ -684,20 +714,12 @@ public class InputController extends JFrame {
     }
 
     private static class UOSThread implements Runnable {
-        private volatile UOS uos = null;
         private volatile boolean started = false;
 
         @Override
         public void run() {
             if (started)
                 throw new RuntimeException("UOS instance alread running.");
-
-            uos = new UOS();
-            TCPProperties props = new MulticastRadar.Properties();
-            props.setPort(8300);
-            props.setPassivePortRange(8301, 8310);
-            props.put("ubiquitos.multicast.beaconFrequencyInSeconds", 10);
-            uos.start(props);
             started = true;
         }
 
